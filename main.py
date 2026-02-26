@@ -5,7 +5,7 @@ import google.generativeai as genai
 
 app = FastAPI()
 
-genai.configure(api_key=os.getenv("AIzaSyC08wwV6VxVNpW-tC8HKqku_lPMw790FL4"))
+genai.configure(api_key=os.getenv(""))
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 class Message(BaseModel):
