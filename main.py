@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 app = FastAPI(
-    title="ZERDE backend",
+    title="Friday backend",
     description=(
         "⚠️ Privacy notice:\n"
         "- Бұл сервиске жіберілген хабарламалар серверде өңделеді.\n"
@@ -21,13 +21,13 @@ class ChatRequest(BaseModel):
 @app.get("/")
 def root():
     return {
-        "status": "ZERDE backend is running",
+        "status": "Friday backend is running",
         "notice": "Құпия ақпарат жіберме. Хабарламалар өңделуі/логқа түсуі мүмкін."
     }
 
 @app.post("/chat")
 def chat(data: ChatRequest):
-    # ӘЗІРГЕ база жоқ — тек echo (кейін база + AI қосамыз)
+    
     return {
         "response": f"Сен жаздың: {data.message}",
         "notice": "⚠️ Құпия ақпарат жіберме. Хабарламалар өңделуі/логқа түсуі мүмкін.",
