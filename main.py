@@ -1,23 +1,33 @@
 import os
+import uuid
 import psycopg2
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from google import genai
-
-app = FastAPI()
-
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL env is missing")
 
 
 def get_connection():
     return psycopg2.connect(DATABASE_URL)
 
 
-# ===== Models =====
+app = FastAPI(title="Friday Backend")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 class RegisterRequest(BaseModel):
     username: str
-    password: str
 
 
 class ChatRequest(BaseModel):
@@ -30,130 +40,154 @@ class AssistantNameRequest(BaseModel):
     assistant_name: str
 
 
-# ===== Helper =====
-def get_user_by_token(token):
+def get_user_by_token(token: str):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id, username, assistant_name FROM users WHERE token=%s", (token,))
-    row = cur.fetchone()
+    cur.execute(
+        "SELECT id, username, assistant_name FROM users WHERE token = %s",
+        (token,),
+    )
+    user = cur.fetchone()
     cur.close()
     conn.close()
+    return user
 
-    if not row:
-        return None
+
+@app.get("/")
+def root():
+    return {"status": "ok", "docs": "/docs"}
+
+
+@app.post("/register")
+def register(body: RegisterRequest):
+    username = body.username.strip()
+
+    if not username:
+        raise HTTPException(status_code=422, detail="username is required")
+
+    token = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            "INSERT INTO users (id, username, token) VALUES (%s, %s, %s)",
+            (user_id, username, token),
+        )
+        conn.commit()
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        raise HTTPException(status_code=409, detail="username already exists")
+    finally:
+        cur.close()
+        conn.close()
 
     return {
-        "id": row[0],
-        "username": row[1],
-        "assistant_name": row[2],
+        "message": "User created",
+        "token": token
     }
 
 
-# ===== Register =====
-@app.post("/register")
-def register(body: RegisterRequest):
-    import uuid
+@app.get("/me")
+def me(token: str):
+    user = get_user_by_token(token)
 
-    token = str(uuid.uuid4())
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute(
-        "INSERT INTO users (username, password, token) VALUES (%s, %s, %s)",
-        (body.username, body.password, token),
-    )
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return {"token": token}
+    return {
+        "id": user[0],
+        "username": user[1],
+        "assistant_name": user[2]
+    }
 
 
-# ===== Assistant Name =====
 @app.post("/assistant-name")
-def assistant_name(body: AssistantNameRequest):
+def change_assistant_name(body: AssistantNameRequest):
     token = body.token.strip()
     name = body.assistant_name.strip()
 
     if not token or not name:
         raise HTTPException(status_code=422, detail="token and assistant_name required")
 
+    user = get_user_by_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
     conn = get_connection()
     cur = conn.cursor()
 
     cur.execute(
-        "UPDATE users SET assistant_name=%s WHERE token=%s",
-        (name, token),
+        "UPDATE users SET assistant_name = %s WHERE token = %s",
+        (name, token)
     )
 
     conn.commit()
     cur.close()
     conn.close()
 
-    return {"assistant_name": name}
+    return {"message": "assistant name updated"}
 
 
-# ===== Chat =====
 @app.post("/chat")
 def chat(body: ChatRequest):
     token = body.token.strip()
-    msg = body.message.strip()
+    message = body.message.strip()
 
-    if not token or not msg:
+    if not token or not message:
         raise HTTPException(status_code=422, detail="token and message required")
 
     user = get_user_by_token(token)
+
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    assistant_name = user.get("assistant_name") or "Friday"
+    user_id = user[0]
+    assistant_name = user[2] if user[2] else "Friday"
 
-    try:
-        response = client.models.generate_content(
-            contents=f"You are an AI assistant named {assistant_name}. User says: {msg}",
-        )
-
-        bot_reply = response.text
-
-    except Exception as e:
-        bot_reply = f"AI error: {str(e)}"
+    reply = f"{assistant_name}: Сен жаздың — {message}"
 
     conn = get_connection()
     cur = conn.cursor()
 
     cur.execute(
-        "INSERT INTO messages (user_id, user_message, bot_response) VALUES (%s,%s,%s)",
-        (str(user["id"]), msg, bot_reply),
+        "INSERT INTO messages (user_id, user_message, bot_response) VALUES (%s, %s, %s)",
+        (user_id, message, reply)
     )
 
     conn.commit()
     cur.close()
     conn.close()
 
-    return {"assistant": assistant_name, "reply": bot_reply}
+    return {
+        "assistant": assistant_name,
+        "reply": reply
+    }
 
 
-# ===== Messages =====
 @app.get("/messages")
-def get_messages(token: str, limit: int = 50):
+def get_messages(token: str):
     user = get_user_by_token(token)
+
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+    user_id = user[0]
 
     conn = get_connection()
     cur = conn.cursor()
 
     cur.execute(
         """
-        SELECT id,user_message,bot_response,created_at
+        SELECT user_message, bot_response, created_at
         FROM messages
-        WHERE user_id=%s
-        ORDER BY id DESC
-        LIMIT %s
+        WHERE user_id = %s
+        ORDER BY created_at DESC
+        LIMIT 50
         """,
-        (str(user["id"]), limit),
+        (user_id,)
     )
 
     rows = cur.fetchall()
@@ -161,4 +195,12 @@ def get_messages(token: str, limit: int = 50):
     cur.close()
     conn.close()
 
-    return {"messages": rows}
+    result = []
+    for r in rows:
+        result.append({
+            "user_message": r[0],
+            "bot_response": r[1],
+            "created_at": str(r[2])
+        })
+
+    return {"messages": result}
