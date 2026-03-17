@@ -168,7 +168,7 @@ def chat(body: ChatRequest):
         completion = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {"role": "system", "content": f"Сенің атың {assistant_name}. Қысқа әрі түсінікті жауап бер."},
+                {"role": "system", "content": f"Сенің атың {assistant_name}. Пайдаланушы қай тілде жазса, дәл сол тілде жауап бер. Басқа тіл қоспа. Жауапты нақты және сауатты жаз."},
                 {"role": "user", "content": message}
             ]
         )
