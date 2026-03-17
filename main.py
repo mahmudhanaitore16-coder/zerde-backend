@@ -166,7 +166,7 @@ def chat(body: ChatRequest):
 
     try:
         completion = client.chat.completions.create(
-            model="llama3-8b-8192",
+            model="llama-3.1-8b-instant",
             messages=[
                 {"role": "system", "content": f"Сенің атың {assistant_name}. Қысқа әрі түсінікті жауап бер."},
                 {"role": "user", "content": message}
